@@ -25,35 +25,9 @@ const AGENTS = [
 - xG (expected goals) si está disponible
 - H2H últimos 5 partidos CON MARCADORES EXACTOS
 - Forma últimos 5 y lesiones
+- Jugador más determinante de cada equipo: goles/asistencias de la temporada, si es capitán, minutos jugados, y cómo le fue al equipo en partidos donde no jugó (lesión/sanción)
 
 Formato compacto (máx 12 líneas).`
-  },
-  {
-    id: "marcadores",
-    name: "🎯 Marcadores",
-    search: false,
-    model: MODEL_GRANDE,
-    prompt: `Especialista en RESULTADOS CORRECTOS (Correct Score).
-
-Con los datos del Scout, analiza:
-1. Promedio de goles de cada equipo (local/visitante)
-2. Resultados más frecuentes en H2H
-3. xG y tendencias de goles
-
-Calcula probabilidad de cada marcador usando:
-- Distribución de Poisson: P(x) = (λ^x × e^-λ) / x!
-- Donde λ = promedio goles esperados
-
-Formato:
-═══ MARCADORES MÁS PROBABLES ═══
-1. [X-X] → XX% prob | Cuota justa: X.XX
-2. [X-X] → XX% prob | Cuota justa: X.XX
-3. [X-X] → XX% prob | Cuota justa: X.XX
-4. [X-X] → XX% prob | Cuota justa: X.XX
-5. [X-X] → XX% prob | Cuota justa: X.XX
-
-VALOR: Si la casa paga más que la cuota justa = HAY VALOR
-MEJOR APUESTA: [marcador] @ [cuota casa] vs [cuota justa] → EV +XX%`
   },
   {
     id: "tarjetas",
@@ -88,37 +62,35 @@ MEJOR APUESTA: [mercado]
 (máx 2 líneas)`
   },
   {
-    id: "tactico",
-    name: "📋 Táctico",
+    id: "jugadores_clave",
+    name: "⭐ Jugadores Clave",
     search: false,
-    model: MODEL_CHICO,
-    prompt: `Táctico. FACTOR_CLAVE: [lo más importante del partido] (1 línea)`
-  },
-  {
-    id: "h2h",
-    name: "📜 H2H",
-    search: false,
-    model: MODEL_CHICO,
-    prompt: `H2H. TENDENCIA: [patrón de los últimos enfrentamientos] (1 línea)`
-  },
-  {
-    id: "esceptico",
-    name: "🔍 Escéptico",
-    search: false,
-    model: MODEL_CHICO,
-    prompt: `Escéptico. Cuestiona todo:
-TRAMPA: [mercado inflado sin valor]
-VALOR OCULTO: [mercado que nadie ve]
-(máx 2 líneas)`
+    model: MODEL_GRANDE,
+    prompt: `Especialista en JUGADORES CLAVE. Con los datos del Scout, arma:
+
+TOP 3 JUGADORES CLAVE (uno o más por equipo) basándote en:
+- Estadísticas de la temporada (goles, asistencias, participación en gol)
+- Capitanía / liderazgo
+- Influencia en el juego del equipo
+- Cómo le fue al equipo cuando este jugador NO estuvo disponible (resultado, rendimiento)
+
+Formato:
+⭐ [Jugador] ([Equipo]) — [rol/posición]
+📊 Stats: [goles/asistencias/dato clave]
+🎖️ Capitán: [Sí/No]
+📉 Sin él: [qué pasó con el equipo en su ausencia, si hay datos]
+⚠️ RIESGO: [si está en duda por lesión/suspensión, indicarlo]
+
+(uno de estos bloques por cada jugador, máx 3 jugadores total)`
   },
   {
     id: "matematico",
     name: "🧮 Matemático",
     search: false,
     model: MODEL_CHICO,
-    prompt: `Matemático. Calcula EV = (Prob × Cuota) - 1 para TODOS los mercados incluyendo marcadores exactos.
+    prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Disparos, Jugadores Clave), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
 
-TOP 5 VALOR (incluyendo al menos 1 marcador exacto):
+TOP 5 VALOR:
 1. [mercado/marcador] @ [cuota] → EV +XX%
 2. [mercado/marcador] @ [cuota] → EV +XX%
 3. [mercado/marcador] @ [cuota] → EV +XX%
@@ -189,7 +161,7 @@ export async function POST(request: NextRequest) {
           let context = "";
           if (agent.id === "scout") {
             context = `Partido: ${partido}\nCasa: ${CASA_APUESTAS}`;
-          } else if (["esceptico", "matematico", "sintetizador"].includes(agent.id)) {
+          } else if (["matematico", "sintetizador"].includes(agent.id)) {
             context = Object.entries(results).map(([id, text]) => {
               const a = AGENTS.find(x => x.id === id);
               return `${a?.name || id}:\n${text}`;
