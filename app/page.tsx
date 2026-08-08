@@ -7,11 +7,12 @@ const AGENTS_INFO: Record<string, { name: string; icon: string; color: string }>
   corners: { name: "Córners", icon: "🚩", color: "#F97316" },
   disparos: { name: "Disparos", icon: "🎯", color: "#0EA5E9" },
   jugadores_clave: { name: "Jugadores Clave", icon: "⭐", color: "#EAB308" },
+  esceptico: { name: "Escéptico", icon: "🔍", color: "#DC2626" },
   matematico: { name: "Matemático", icon: "🧮", color: "#10B981" },
   sintetizador: { name: "Síntesis", icon: "🧠", color: "#7C3AED" },
 };
 
-const AGENT_ORDER = ["scout", "tarjetas", "corners", "disparos", "jugadores_clave", "matematico", "sintetizador"];
+const AGENT_ORDER = ["scout", "tarjetas", "corners", "disparos", "jugadores_clave", "esceptico", "matematico", "sintetizador"];
 const TOTAL_AGENTS = AGENT_ORDER.length;
 
 export default function Home() {

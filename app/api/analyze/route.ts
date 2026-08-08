@@ -84,11 +84,21 @@ Formato:
 (uno de estos bloques por cada jugador, máx 3 jugadores total)`
   },
   {
+    id: "esceptico",
+    name: "🔍 Escéptico",
+    search: false,
+    model: MODEL_CHICO,
+    prompt: `Escéptico. Cuestiona todo:
+TRAMPA: [mercado inflado sin valor]
+VALOR OCULTO: [mercado que nadie ve]
+(máx 2 líneas)`
+  },
+  {
     id: "matematico",
     name: "🧮 Matemático",
     search: false,
     model: MODEL_CHICO,
-    prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Disparos, Jugadores Clave), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
+    prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Disparos, Jugadores Clave, Escéptico), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
 
 TOP 5 VALOR:
 1. [mercado/marcador] @ [cuota] → EV +XX%
