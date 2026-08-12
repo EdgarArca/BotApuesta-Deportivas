@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef } from "react";
+import * as XLSX from "xlsx";
 
 const AGENTS_INFO: Record<string, { name: string; icon: string; color: string }> = {
   scout: { name: "Scout", icon: "🔭", color: "#8B5CF6" },
@@ -15,6 +16,119 @@ const AGENTS_INFO: Record<string, { name: string; icon: string; color: string }>
 const AGENT_ORDER = ["scout", "tarjetas", "corners", "disparos", "jugadores_clave", "esceptico", "matematico", "sintetizador"];
 const TOTAL_AGENTS = AGENT_ORDER.length;
 
+// Columnas esperadas en cada bloque de equipo del Excel (en este orden, empezando en col B)
+const COLUMNAS = [
+  "fecha", "rival", "condicion", "resultado", "golAFavor", "golEnContra",
+  "golesTotal", "rojas", "amarillasEquipo", "amarillasRival", "amarillasTotal",
+  "cornersAFavor", "cornersEnContra", "cornersTotal",
+] as const;
+
+// Columnas del bloque "Proximos Partidos" (fecha, rival, condicion, competencia)
+const COLUMNAS_PROXIMO = ["fecha", "rival", "condicion", "competencia"] as const;
+
+type Partido = Record<(typeof COLUMNAS)[number], any>;
+type ProximoPartido = Record<(typeof COLUMNAS_PROXIMO)[number], any>;
+type EquipoExcel = { equipo: string; partidos: Partido[]; proximos: ProximoPartido[] };
+
+function formatFecha(f: any): string {
+  if (f instanceof Date) return f.toLocaleDateString("es-PY");
+  if (typeof f === "number") {
+    // fecha serial de Excel, por si cellDates no la convirtió
+    const d = XLSX.SSF.parse_date_code(f);
+    if (d) return `${String(d.d).padStart(2, "0")}/${String(d.m).padStart(2, "0")}/${d.y}`;
+  }
+  return String(f ?? "");
+}
+
+function filaVacia(fila: any[] | undefined): boolean {
+  if (!fila) return true;
+  return fila.every(c => c === undefined || c === null || c === "");
+}
+
+// Recorre las filas crudas del Excel y arma un bloque por cada equipo:
+// nombre del equipo → encabezados → partidos jugados → (opcional) "Proximos Partidos" → fechas.
+function parsearExcel(rows: any[][]): EquipoExcel[] {
+  const equipos: EquipoExcel[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const fila = rows[i] || [];
+    const c1 = fila[1];
+    const c2 = fila[2];
+    const esFilaDeEquipo = typeof c1 === "string" && c1.trim() !== "" &&
+      c1.trim().toLowerCase() !== "fecha" &&
+      c1.trim().toLowerCase() !== "proximos partidos" &&
+      (c2 === undefined || c2 === null || c2 === "");
+
+    if (esFilaDeEquipo) {
+      const nombreEquipo = c1.trim();
+      i++;
+      if (rows[i] && String(rows[i][1]).trim().toLowerCase() === "fecha") i++; // saltar encabezados
+
+      const partidos: Partido[] = [];
+      while (i < rows.length && rows[i] && rows[i][1] !== undefined && rows[i][1] !== null && rows[i][1] !== "") {
+        const r = rows[i];
+        const partido = {} as Partido;
+        COLUMNAS.forEach((col, idx) => { partido[col] = r[idx + 1]; });
+        partidos.push(partido);
+        i++;
+      }
+
+      // Puede venir una fila en blanco y después "Proximos Partidos" para este mismo equipo
+      let j = i;
+      while (j < rows.length && filaVacia(rows[j])) j++;
+      const proximos: ProximoPartido[] = [];
+      if (rows[j] && typeof rows[j][1] === "string" && rows[j][1].trim().toLowerCase() === "proximos partidos") {
+        j++;
+        while (j < rows.length && rows[j] && rows[j][1] !== undefined && rows[j][1] !== null && rows[j][1] !== "") {
+          const r = rows[j];
+          const prox = {} as ProximoPartido;
+          COLUMNAS_PROXIMO.forEach((col, idx) => { prox[col] = r[idx + 1]; });
+          proximos.push(prox);
+          j++;
+        }
+        i = j; // consumimos también el bloque de próximos partidos
+      }
+
+      equipos.push({ equipo: nombreEquipo, partidos, proximos });
+    } else {
+      i++;
+    }
+  }
+  return equipos;
+}
+
+function promedio(nums: number[]): string {
+  if (nums.length === 0) return "0";
+  return (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2);
+}
+
+// Convierte los partidos parseados de un equipo en texto listo para el prompt
+function formatearBloqueEquipo(e: EquipoExcel): string {
+  if (e.partidos.length === 0) return `${e.equipo}: sin partidos cargados en el Excel`;
+
+  const num = (v: any) => Number(v) || 0;
+  const golF = e.partidos.map(p => num(p.golAFavor));
+  const golC = e.partidos.map(p => num(p.golEnContra));
+  const amE = e.partidos.map(p => num(p.amarillasEquipo));
+  const amR = e.partidos.map(p => num(p.amarillasRival));
+  const corF = e.partidos.map(p => num(p.cornersAFavor));
+  const corC = e.partidos.map(p => num(p.cornersEnContra));
+  const rojasTotal = e.partidos.reduce((a, p) => a + num(p.rojas), 0);
+
+  const detalle = e.partidos.map(p =>
+    `${formatFecha(p.fecha)} vs ${p.rival} (${p.condicion}): ${p.resultado} | Amarillas ${p.amarillasEquipo}-${p.amarillasRival} | Córners ${p.cornersAFavor}-${p.cornersEnContra}`
+  ).join("\n");
+
+  let texto = `${e.equipo} — últimos ${e.partidos.length} partidos:\n${detalle}\n\nPromedios ${e.equipo}: Goles a favor ${promedio(golF)} | Goles en contra ${promedio(golC)} | Amarillas propias ${promedio(amE)} | Amarillas rival ${promedio(amR)} | Córners a favor ${promedio(corF)} | Córners en contra ${promedio(corC)} | Rojas totales (suma): ${rojasTotal}`;
+
+  if (e.proximos.length > 0) {
+    const proxTxt = e.proximos.map(p => `${formatFecha(p.fecha)} vs ${p.rival} (${p.condicion}) — ${p.competencia}`).join("\n");
+    texto += `\n\nPróximos partidos de ${e.equipo} (fixture / congestión de calendario):\n${proxTxt}`;
+  }
+
+  return texto;
+}
+
 export default function Home() {
   const [partido, setPartido] = useState("");
   const [results, setResults] = useState<Record<string, string>>({});
@@ -24,31 +138,49 @@ export default function Home() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [skippedAgents, setSkippedAgents] = useState<Record<string, boolean>>({});
 
-  // Datos manuales (opcional) para saltear el Scout y ahorrar tokens
-  const [mostrarDatos, setMostrarDatos] = useState(false);
-  const [ultimos5Local, setUltimos5Local] = useState("");
-  const [ultimos5Visitante, setUltimos5Visitante] = useState("");
-  const [tarjetasLocal, setTarjetasLocal] = useState("");
-  const [tarjetasVisitante, setTarjetasVisitante] = useState("");
-  const [cornersLocal, setCornersLocal] = useState("");
-  const [cornersVisitante, setCornersVisitante] = useState("");
-  const [golesLocal, setGolesLocal] = useState("");
-  const [golesVisitante, setGolesVisitante] = useState("");
-  const [jugadoresClave, setJugadoresClave] = useState("");
-  const [proximosLocal, setProximosLocal] = useState("");
-  const [proximosVisitante, setProximosVisitante] = useState("");
+  // Datos cargados desde Excel (opcional) para saltear el Scout y ahorrar tokens
+  const [equiposExcel, setEquiposExcel] = useState<EquipoExcel[] | null>(null);
+  const [nombreArchivo, setNombreArchivo] = useState("");
+  const [errorExcel, setErrorExcel] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorExcel("");
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+      const equipos = parsearExcel(rows);
+
+      if (equipos.length === 0) {
+        setErrorExcel("No pude reconocer equipos en el Excel. Revisá que siga la plantilla (nombre de equipo en una fila, encabezados en la siguiente, partidos abajo).");
+        setEquiposExcel(null);
+        return;
+      }
+      setEquiposExcel(equipos);
+      setNombreArchivo(file.name);
+    } catch (err: any) {
+      setErrorExcel("No pude leer el archivo: " + err.message);
+      setEquiposExcel(null);
+    }
+  }
+
+  function quitarExcel() {
+    setEquiposExcel(null);
+    setNombreArchivo("");
+    setErrorExcel("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   function construirDatosManuales(): string {
-    const bloques = [
-      ultimos5Local && `Últimos 5 resultados equipo local:\n${ultimos5Local}`,
-      ultimos5Visitante && `Últimos 5 resultados equipo visitante:\n${ultimos5Visitante}`,
-      (tarjetasLocal || tarjetasVisitante) && `Tarjetas — Local: ${tarjetasLocal || "N/D"} | Visitante: ${tarjetasVisitante || "N/D"}`,
-      (cornersLocal || cornersVisitante) && `Córners — Local: ${cornersLocal || "N/D"} | Visitante: ${cornersVisitante || "N/D"}`,
-      (golesLocal || golesVisitante) && `Goles (a favor/en contra) — Local: ${golesLocal || "N/D"} | Visitante: ${golesVisitante || "N/D"}`,
-      jugadoresClave && `Jugadores clave (según el usuario):\n${jugadoresClave}`,
-      proximosLocal && `Próximos 2 partidos del equipo local:\n${proximosLocal}`,
-      proximosVisitante && `Próximos 2 partidos del equipo visitante:\n${proximosVisitante}`,
-    ].filter(Boolean);
+    const bloques: string[] = [];
+    if (equiposExcel && equiposExcel.length > 0) {
+      bloques.push("DATOS HISTÓRICOS CARGADOS POR EL USUARIO (desde Excel):");
+      equiposExcel.forEach(e => bloques.push(formatearBloqueEquipo(e)));
+    }
     return bloques.join("\n\n");
   }
 
@@ -138,141 +270,40 @@ export default function Home() {
             className="w-full rounded-lg border px-3 py-2.5 mb-3 outline-none focus:border-purple-400"
           />
 
-          <button
-            type="button"
-            onClick={() => setMostrarDatos(v => !v)}
-            className="w-full text-left text-xs font-semibold text-purple-600 mb-3 flex items-center gap-1"
-          >
-            {mostrarDatos ? "▲" : "▼"} Datos manuales (opcional, ahorra tokens — se salta la búsqueda del Scout)
-          </button>
-
-          {mostrarDatos && (
-            <div className="space-y-3 mb-4 bg-purple-50/50 rounded-lg p-3 border border-purple-100">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Últimos 5 — Local</label>
-                  <textarea
-                    value={ultimos5Local}
-                    onChange={(e) => setUltimos5Local(e.target.value)}
-                    placeholder="Ej: W 2-0, L 0-1, D 1-1, W 3-0, L 0-2"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
-                    rows={2}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Últimos 5 — Visitante</label>
-                  <textarea
-                    value={ultimos5Visitante}
-                    onChange={(e) => setUltimos5Visitante(e.target.value)}
-                    placeholder="Ej: W 1-0, W 2-1, D 0-0, L 1-2, W 3-1"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
-                    rows={2}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Tarjetas — Local</label>
-                  <input
-                    value={tarjetasLocal}
-                    onChange={(e) => setTarjetasLocal(e.target.value)}
-                    placeholder="Ej: 3.2 por partido"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Tarjetas — Visitante</label>
-                  <input
-                    value={tarjetasVisitante}
-                    onChange={(e) => setTarjetasVisitante(e.target.value)}
-                    placeholder="Ej: 2.5 por partido"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Córners — Local</label>
-                  <input
-                    value={cornersLocal}
-                    onChange={(e) => setCornersLocal(e.target.value)}
-                    placeholder="Ej: 5.8 por partido"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Córners — Visitante</label>
-                  <input
-                    value={cornersVisitante}
-                    onChange={(e) => setCornersVisitante(e.target.value)}
-                    placeholder="Ej: 4.1 por partido"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Goles (favor/contra) — Local</label>
-                  <input
-                    value={golesLocal}
-                    onChange={(e) => setGolesLocal(e.target.value)}
-                    placeholder="Ej: 1.8 a favor / 0.9 en contra"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Goles (favor/contra) — Visitante</label>
-                  <input
-                    value={golesVisitante}
-                    onChange={(e) => setGolesVisitante(e.target.value)}
-                    placeholder="Ej: 1.2 a favor / 1.4 en contra"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-semibold text-gray-500">Jugadores clave (según vos)</label>
-                <textarea
-                  value={jugadoresClave}
-                  onChange={(e) => setJugadoresClave(e.target.value)}
-                  placeholder="Ej: Juan Pérez (delantero, 8 goles, capitán, equipo pierde 60% sin él)"
-                  className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
-                  rows={2}
+          <div className="mb-3">
+            <label className="text-[10px] font-semibold text-gray-500 block mb-1">
+              📊 Excel con datos históricos (opcional, ahorra tokens — se salta la búsqueda del Scout)
+            </label>
+            {!equiposExcel ? (
+              <label className="flex items-center justify-center gap-2 border-2 border-dashed border-purple-200 rounded-lg py-3 text-xs text-purple-600 cursor-pointer hover:bg-purple-50">
+                📁 Subir Liga_Paraguaya.xlsx (misma plantilla de siempre)
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleExcelUpload}
+                  className="hidden"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Próximos 2 partidos — Local</label>
-                  <textarea
-                    value={proximosLocal}
-                    onChange={(e) => setProximosLocal(e.target.value)}
-                    placeholder="Ej: vs Equipo X (liga), vs Equipo Y (copa)"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
-                    rows={2}
-                  />
+              </label>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-emerald-700">✓ {nombreArchivo}</span>
+                  <button onClick={quitarExcel} className="text-xs text-gray-400 hover:text-red-500">✕ quitar</button>
                 </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-500">Próximos 2 partidos — Visitante</label>
-                  <textarea
-                    value={proximosVisitante}
-                    onChange={(e) => setProximosVisitante(e.target.value)}
-                    placeholder="Ej: vs Equipo Z (liga), vs Equipo W (copa)"
-                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
-                    rows={2}
-                  />
-                </div>
+                {equiposExcel.map(e => (
+                  <div key={e.equipo} className="text-[10px] text-gray-600">
+                    <span className="font-semibold">{e.equipo}</span>: {e.partidos.length} partidos cargados
+                    {e.proximos.length > 0 && <> · {e.proximos.length} próximos partidos</>}
+                  </div>
+                ))}
               </div>
+            )}
+            {errorExcel && (
+              <p className="text-[10px] text-red-500 mt-1">{errorExcel}</p>
+            )}
+          </div>
 
-              <p className="text-[10px] text-gray-400">
-                Campos vacíos se ignoran. Si dejás todo vacío, el Scout busca los datos por su cuenta (gasta más tokens).
-              </p>
-            </div>
-          )}
           <button
             onClick={analizar}
             disabled={loading || !partido.trim()}
