@@ -148,7 +148,7 @@ async function callClaude(client: Anthropic, prompt: string, context: string, us
 }
 
 export async function POST(request: NextRequest) {
-  const { partido } = await request.json();
+  const { partido, datosManuales } = await request.json();
   
   if (!partido) {
     return new Response(JSON.stringify({ error: "Falta partido" }), { status: 400 });
@@ -161,12 +161,29 @@ export async function POST(request: NextRequest) {
 
   const client = new Anthropic({ apiKey });
   const encoder = new TextEncoder();
+
+  // Si el usuario cargó datos manuales, nos salteamos la llamada de IA del Scout
+  // por completo (ni siquiera un token gastado ahí) y usamos su texto tal cual.
+  const tieneDatosManuales = typeof datosManuales === "string" && datosManuales.trim().length > 0;
   
   const stream = new ReadableStream({
     async start(controller) {
       const results: Record<string, string> = {};
+
+      if (tieneDatosManuales) {
+        results.scout = datosManuales.trim();
+        const data = JSON.stringify({
+          agentId: "scout",
+          name: "🔭 Scout",
+          result: results.scout,
+          skipped: true, // no se llamó a la IA para este agente
+          done: false
+        });
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      }
       
       for (const agent of AGENTS) {
+        if (agent.id === "scout" && tieneDatosManuales) continue; // ya resuelto arriba, sin costo
         try {
           let context = "";
           if (agent.id === "scout") {

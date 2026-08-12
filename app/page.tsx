@@ -22,6 +22,35 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [skippedAgents, setSkippedAgents] = useState<Record<string, boolean>>({});
+
+  // Datos manuales (opcional) para saltear el Scout y ahorrar tokens
+  const [mostrarDatos, setMostrarDatos] = useState(false);
+  const [ultimos5Local, setUltimos5Local] = useState("");
+  const [ultimos5Visitante, setUltimos5Visitante] = useState("");
+  const [tarjetasLocal, setTarjetasLocal] = useState("");
+  const [tarjetasVisitante, setTarjetasVisitante] = useState("");
+  const [cornersLocal, setCornersLocal] = useState("");
+  const [cornersVisitante, setCornersVisitante] = useState("");
+  const [golesLocal, setGolesLocal] = useState("");
+  const [golesVisitante, setGolesVisitante] = useState("");
+  const [jugadoresClave, setJugadoresClave] = useState("");
+  const [proximosLocal, setProximosLocal] = useState("");
+  const [proximosVisitante, setProximosVisitante] = useState("");
+
+  function construirDatosManuales(): string {
+    const bloques = [
+      ultimos5Local && `Últimos 5 resultados equipo local:\n${ultimos5Local}`,
+      ultimos5Visitante && `Últimos 5 resultados equipo visitante:\n${ultimos5Visitante}`,
+      (tarjetasLocal || tarjetasVisitante) && `Tarjetas — Local: ${tarjetasLocal || "N/D"} | Visitante: ${tarjetasVisitante || "N/D"}`,
+      (cornersLocal || cornersVisitante) && `Córners — Local: ${cornersLocal || "N/D"} | Visitante: ${cornersVisitante || "N/D"}`,
+      (golesLocal || golesVisitante) && `Goles (a favor/en contra) — Local: ${golesLocal || "N/D"} | Visitante: ${golesVisitante || "N/D"}`,
+      jugadoresClave && `Jugadores clave (según el usuario):\n${jugadoresClave}`,
+      proximosLocal && `Próximos 2 partidos del equipo local:\n${proximosLocal}`,
+      proximosVisitante && `Próximos 2 partidos del equipo visitante:\n${proximosVisitante}`,
+    ].filter(Boolean);
+    return bloques.join("\n\n");
+  }
 
   async function analizar() {
     if (!partido.trim() || loading) return;
@@ -29,12 +58,15 @@ export default function Home() {
     setError("");
     setResults({});
     setActiveAgent("scout");
+    setSkippedAgents({});
+
+    const datosManuales = construirDatosManuales();
 
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partido }),
+        body: JSON.stringify({ partido, datosManuales }),
       });
 
       const reader = response.body?.getReader();
@@ -57,6 +89,9 @@ export default function Home() {
               setError(`${data.agentId}: ${data.error}`);
             } else if (data.result) {
               setResults(prev => ({ ...prev, [data.agentId]: data.result }));
+              if (data.skipped) {
+                setSkippedAgents(prev => ({ ...prev, [data.agentId]: true }));
+              }
               
               const currentIndex = AGENT_ORDER.indexOf(data.agentId);
               if (currentIndex < AGENT_ORDER.length - 1) {
@@ -102,6 +137,142 @@ export default function Home() {
             placeholder="Ej: Barcelona vs Real Madrid La Liga"
             className="w-full rounded-lg border px-3 py-2.5 mb-3 outline-none focus:border-purple-400"
           />
+
+          <button
+            type="button"
+            onClick={() => setMostrarDatos(v => !v)}
+            className="w-full text-left text-xs font-semibold text-purple-600 mb-3 flex items-center gap-1"
+          >
+            {mostrarDatos ? "▲" : "▼"} Datos manuales (opcional, ahorra tokens — se salta la búsqueda del Scout)
+          </button>
+
+          {mostrarDatos && (
+            <div className="space-y-3 mb-4 bg-purple-50/50 rounded-lg p-3 border border-purple-100">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Últimos 5 — Local</label>
+                  <textarea
+                    value={ultimos5Local}
+                    onChange={(e) => setUltimos5Local(e.target.value)}
+                    placeholder="Ej: W 2-0, L 0-1, D 1-1, W 3-0, L 0-2"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
+                    rows={2}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Últimos 5 — Visitante</label>
+                  <textarea
+                    value={ultimos5Visitante}
+                    onChange={(e) => setUltimos5Visitante(e.target.value)}
+                    placeholder="Ej: W 1-0, W 2-1, D 0-0, L 1-2, W 3-1"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
+                    rows={2}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Tarjetas — Local</label>
+                  <input
+                    value={tarjetasLocal}
+                    onChange={(e) => setTarjetasLocal(e.target.value)}
+                    placeholder="Ej: 3.2 por partido"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Tarjetas — Visitante</label>
+                  <input
+                    value={tarjetasVisitante}
+                    onChange={(e) => setTarjetasVisitante(e.target.value)}
+                    placeholder="Ej: 2.5 por partido"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Córners — Local</label>
+                  <input
+                    value={cornersLocal}
+                    onChange={(e) => setCornersLocal(e.target.value)}
+                    placeholder="Ej: 5.8 por partido"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Córners — Visitante</label>
+                  <input
+                    value={cornersVisitante}
+                    onChange={(e) => setCornersVisitante(e.target.value)}
+                    placeholder="Ej: 4.1 por partido"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Goles (favor/contra) — Local</label>
+                  <input
+                    value={golesLocal}
+                    onChange={(e) => setGolesLocal(e.target.value)}
+                    placeholder="Ej: 1.8 a favor / 0.9 en contra"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Goles (favor/contra) — Visitante</label>
+                  <input
+                    value={golesVisitante}
+                    onChange={(e) => setGolesVisitante(e.target.value)}
+                    placeholder="Ej: 1.2 a favor / 1.4 en contra"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500">Jugadores clave (según vos)</label>
+                <textarea
+                  value={jugadoresClave}
+                  onChange={(e) => setJugadoresClave(e.target.value)}
+                  placeholder="Ej: Juan Pérez (delantero, 8 goles, capitán, equipo pierde 60% sin él)"
+                  className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
+                  rows={2}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Próximos 2 partidos — Local</label>
+                  <textarea
+                    value={proximosLocal}
+                    onChange={(e) => setProximosLocal(e.target.value)}
+                    placeholder="Ej: vs Equipo X (liga), vs Equipo Y (copa)"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
+                    rows={2}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-500">Próximos 2 partidos — Visitante</label>
+                  <textarea
+                    value={proximosVisitante}
+                    onChange={(e) => setProximosVisitante(e.target.value)}
+                    placeholder="Ej: vs Equipo Z (liga), vs Equipo W (copa)"
+                    className="w-full rounded border px-2 py-1.5 text-xs outline-none focus:border-purple-400 resize-none"
+                    rows={2}
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-gray-400">
+                Campos vacíos se ignoran. Si dejás todo vacío, el Scout busca los datos por su cuenta (gasta más tokens).
+              </p>
+            </div>
+          )}
           <button
             onClick={analizar}
             disabled={loading || !partido.trim()}
@@ -174,6 +345,7 @@ export default function Home() {
                       <span className="text-sm">{agent.icon}</span>
                       <span className="text-xs font-semibold" style={{ color: result ? "#111" : "#aaa" }}>{agent.name}</span>
                       {result && !isActive && <span className="ml-auto text-xs" style={{ color: agent.color }}>✓</span>}
+                      {skippedAgents[id] && <span className="ml-1 text-[8px] bg-emerald-100 text-emerald-600 px-1 rounded">manual</span>}
                       {isActive && <div className="ml-auto h-2 w-2 rounded-full animate-pulse" style={{ background: agent.color }} />}
                     </div>
                     {result && (
