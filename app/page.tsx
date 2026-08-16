@@ -16,85 +16,157 @@ const AGENTS_INFO: Record<string, { name: string; icon: string; color: string }>
 const AGENT_ORDER = ["scout", "tarjetas", "corners", "disparos", "jugadores_clave", "esceptico", "matematico", "sintetizador"];
 const TOTAL_AGENTS = AGENT_ORDER.length;
 
-// Columnas esperadas en cada bloque de equipo del Excel (en este orden, empezando en col B)
+// Columnas esperadas en la tabla principal de cada equipo (empezando en col B)
 const COLUMNAS = [
   "fecha", "rival", "condicion", "resultado", "golAFavor", "golEnContra",
   "golesTotal", "rojas", "amarillasEquipo", "amarillasRival", "amarillasTotal",
   "cornersAFavor", "cornersEnContra", "cornersTotal",
 ] as const;
 
-// Columnas del bloque "Proximos Partidos" (fecha, rival, condicion, competencia)
-const COLUMNAS_PROXIMO = ["fecha", "rival", "condicion", "competencia"] as const;
-
 type Partido = Record<(typeof COLUMNAS)[number], any>;
-type ProximoPartido = Record<(typeof COLUMNAS_PROXIMO)[number], any>;
-type EquipoExcel = { equipo: string; partidos: Partido[]; proximos: ProximoPartido[] };
+type EquipoExcel = { equipo: string; partidos: Partido[]; proximos: any[]; racha: any[] };
+type DatosExcel = { equipos: EquipoExcel[]; historial: any[]; arbitro: string };
+
+// Etiquetas de secciones especiales que pueden aparecer en cualquier columna
+const ETIQUETAS_SECCION = ["fecha", "proximos partidos", "racha de jugadores", "historial de encuentros"];
+
+// Normaliza el texto de un encabezado leído del Excel a una key de datos consistente
+const MAPA_ENCABEZADOS: Record<string, string> = {
+  fecha: "fecha", rival: "rival", condicion: "condicion",
+  competicion: "competencia", competencia: "competencia",
+  resultado: "resultado", local: "local",
+  jugador: "jugador", estadistica: "estadistica",
+};
 
 function formatFecha(f: any): string {
   if (f instanceof Date) return f.toLocaleDateString("es-PY");
   if (typeof f === "number") {
-    // fecha serial de Excel, por si cellDates no la convirtió
-    const d = XLSX.SSF.parse_date_code(f);
+    const d = XLSX.SSF.parse_date_code(f); // fecha serial de Excel, por si cellDates no la convirtió
     if (d) return `${String(d.d).padStart(2, "0")}/${String(d.m).padStart(2, "0")}/${d.y}`;
   }
   return String(f ?? "");
 }
 
-function filaVacia(fila: any[] | undefined): boolean {
-  if (!fila) return true;
-  return fila.every(c => c === undefined || c === null || c === "");
+function celdaVacia(v: any): boolean {
+  return v === undefined || v === null || v === "";
 }
 
-// Recorre las filas crudas del Excel y arma un bloque por cada equipo:
-// nombre del equipo → encabezados → partidos jugados → (opcional) "Proximos Partidos" → fechas.
-function parsearExcel(rows: any[][]): EquipoExcel[] {
-  const equipos: EquipoExcel[] = [];
-  let i = 0;
-  while (i < rows.length) {
-    const fila = rows[i] || [];
-    const c1 = fila[1];
-    const c2 = fila[2];
-    const esFilaDeEquipo = typeof c1 === "string" && c1.trim() !== "" &&
-      c1.trim().toLowerCase() !== "fecha" &&
-      c1.trim().toLowerCase() !== "proximos partidos" &&
-      (c2 === undefined || c2 === null || c2 === "");
-
-    if (esFilaDeEquipo) {
-      const nombreEquipo = c1.trim();
-      i++;
-      if (rows[i] && String(rows[i][1]).trim().toLowerCase() === "fecha") i++; // saltar encabezados
-
-      const partidos: Partido[] = [];
-      while (i < rows.length && rows[i] && rows[i][1] !== undefined && rows[i][1] !== null && rows[i][1] !== "") {
-        const r = rows[i];
-        const partido = {} as Partido;
-        COLUMNAS.forEach((col, idx) => { partido[col] = r[idx + 1]; });
-        partidos.push(partido);
-        i++;
+// Busca una etiqueta de texto (ej. "Proximos Partidos") en cualquier columna,
+// dentro de un rango de filas dado. Devuelve su posición o null si no está.
+function buscarEtiqueta(rows: any[][], filaIni: number, filaFin: number, etiqueta: string): { fila: number; col: number } | null {
+  const obj = etiqueta.trim().toLowerCase();
+  for (let r = filaIni; r <= filaFin && r < rows.length; r++) {
+    const fila = rows[r] || [];
+    for (let c = 0; c < fila.length; c++) {
+      if (typeof fila[c] === "string" && fila[c].trim().toLowerCase() === obj) {
+        return { fila: r, col: c };
       }
-
-      // Puede venir una fila en blanco y después "Proximos Partidos" para este mismo equipo
-      let j = i;
-      while (j < rows.length && filaVacia(rows[j])) j++;
-      const proximos: ProximoPartido[] = [];
-      if (rows[j] && typeof rows[j][1] === "string" && rows[j][1].trim().toLowerCase() === "proximos partidos") {
-        j++;
-        while (j < rows.length && rows[j] && rows[j][1] !== undefined && rows[j][1] !== null && rows[j][1] !== "") {
-          const r = rows[j];
-          const prox = {} as ProximoPartido;
-          COLUMNAS_PROXIMO.forEach((col, idx) => { prox[col] = r[idx + 1]; });
-          proximos.push(prox);
-          j++;
-        }
-        i = j; // consumimos también el bloque de próximos partidos
-      }
-
-      equipos.push({ equipo: nombreEquipo, partidos, proximos });
-    } else {
-      i++;
     }
   }
-  return equipos;
+  return null;
+}
+
+// Lee una mini-tabla lateral (Próximos Partidos, Racha de Jugadores, Historial, etc.)
+// a partir de dónde esté su etiqueta, sin asumir columnas fijas: si la fila siguiente
+// a la etiqueta es un encabezado reconocido, lo usa; si no, cae a columnasDefault.
+function leerTablaLateral(rows: any[][], labelFila: number, labelCol: number, filaLimite: number, columnasDefault: string[]): any[] {
+  const filaSig = rows[labelFila + 1] || [];
+  const posibleHeader = String(filaSig[labelCol] ?? "").trim().toLowerCase();
+  let columnas: string[];
+  let filaInicioDatos: number;
+
+  if (MAPA_ENCABEZADOS[posibleHeader]) {
+    columnas = [];
+    let c = labelCol;
+    while (!celdaVacia(filaSig[c])) {
+      const texto = String(filaSig[c]).trim().toLowerCase();
+      columnas.push(MAPA_ENCABEZADOS[texto] || texto);
+      c++;
+    }
+    filaInicioDatos = labelFila + 2;
+  } else {
+    columnas = columnasDefault;
+    filaInicioDatos = labelFila + 1;
+  }
+
+  const datos: any[] = [];
+  let i = filaInicioDatos;
+  while (i <= filaLimite && rows[i] && !celdaVacia(rows[i][labelCol])) {
+    const r = rows[i];
+    const obj: any = {};
+    columnas.forEach((col, idx) => { obj[col] = r[labelCol + idx]; });
+    datos.push(obj);
+    i++;
+  }
+  return datos;
+}
+
+// Parser principal: ubica cada bloque de equipo por su nombre, delimita su rango
+// de filas, y dentro de ese rango busca la tabla principal + Próximos Partidos +
+// Racha de Jugadores (dondequiera que estén). Al final busca la sección global
+// de Historial de Encuentros + Árbitro (si existe).
+function parsearExcel(rows: any[][]): DatosExcel {
+  const filasEquipo: number[] = [];
+  let filaHistorial: number | null = null;
+
+  for (let r = 0; r < rows.length; r++) {
+    const fila = rows[r] || [];
+    const c1 = fila[1];
+    const c2 = fila[2];
+    if (typeof c1 === "string" && c1.trim() !== "") {
+      const val = c1.trim().toLowerCase();
+      if (val === "historial de encuentros") { filaHistorial = r; continue; }
+      if (!ETIQUETAS_SECCION.includes(val) && celdaVacia(c2)) {
+        filasEquipo.push(r);
+      }
+    }
+  }
+
+  const finalRow = rows.length - 1;
+  const limites = filasEquipo.map((r, idx) => {
+    const siguiente = filasEquipo[idx + 1] ?? null;
+    if (filaHistorial !== null && (siguiente === null || filaHistorial < siguiente)) return filaHistorial - 1;
+    return siguiente !== null ? siguiente - 1 : finalRow;
+  });
+
+  const equipos: EquipoExcel[] = filasEquipo.map((filaEquipo, idx) => {
+    const nombreEquipo = String(rows[filaEquipo][1]).trim();
+    const filaFin = limites[idx];
+
+    const partidos: Partido[] = [];
+    let i = filaEquipo + 1;
+    if (rows[i] && String(rows[i][1] ?? "").trim().toLowerCase() === "fecha") i++;
+    while (i <= filaFin && rows[i] && !celdaVacia(rows[i][1])) {
+      const r = rows[i];
+      const p = {} as Partido;
+      COLUMNAS.forEach((col, ci) => { p[col] = r[ci + 1]; });
+      partidos.push(p);
+      i++;
+    }
+
+    let proximos: any[] = [];
+    const etProx = buscarEtiqueta(rows, filaEquipo, filaFin, "proximos partidos");
+    if (etProx) proximos = leerTablaLateral(rows, etProx.fila, etProx.col, filaFin, ["fecha", "rival", "condicion", "competencia"]);
+
+    let racha: any[] = [];
+    const etRacha = buscarEtiqueta(rows, filaEquipo, filaFin, "racha de jugadores");
+    if (etRacha) racha = leerTablaLateral(rows, etRacha.fila, etRacha.col, filaFin, ["jugador", "estadistica"]);
+
+    return { equipo: nombreEquipo, partidos, proximos, racha };
+  });
+
+  let historial: any[] = [];
+  let arbitro = "";
+  if (filaHistorial !== null) {
+    historial = leerTablaLateral(rows, filaHistorial, 1, finalRow, ["fecha", "resultado", "local"]);
+    const etArb = buscarEtiqueta(rows, filaHistorial, filaHistorial, "arbitro");
+    if (etArb) {
+      const filaRef = rows[etArb.fila + 1];
+      if (filaRef && !celdaVacia(filaRef[etArb.col])) arbitro = String(filaRef[etArb.col]).trim();
+    }
+  }
+
+  return { equipos, historial, arbitro };
 }
 
 function promedio(nums: number[]): string {
@@ -102,7 +174,7 @@ function promedio(nums: number[]): string {
   return (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2);
 }
 
-// Convierte los partidos parseados de un equipo en texto listo para el prompt
+// Convierte los datos parseados de un equipo en texto listo para el prompt
 function formatearBloqueEquipo(e: EquipoExcel): string {
   if (e.partidos.length === 0) return `${e.equipo}: sin partidos cargados en el Excel`;
 
@@ -126,7 +198,23 @@ function formatearBloqueEquipo(e: EquipoExcel): string {
     texto += `\n\nPróximos partidos de ${e.equipo} (fixture / congestión de calendario):\n${proxTxt}`;
   }
 
+  if (e.racha.length > 0) {
+    const rachaTxt = e.racha.map(j => `${j.jugador}: ${j.estadistica}`).join("\n");
+    texto += `\n\nRacha de jugadores destacados de ${e.equipo} (según el usuario):\n${rachaTxt}`;
+  }
+
   return texto;
+}
+
+// Formatea la sección global (no por equipo): árbitro + historial de enfrentamientos H2H
+function formatearGlobal(datos: DatosExcel): string {
+  const partes: string[] = [];
+  if (datos.arbitro) partes.push(`Árbitro designado: ${datos.arbitro}`);
+  if (datos.historial.length > 0) {
+    const txt = datos.historial.map(h => `${formatFecha(h.fecha)}: ${h.resultado} (local: ${h.local})`).join("\n");
+    partes.push(`Historial de enfrentamientos directos (H2H):\n${txt}`);
+  }
+  return partes.join("\n\n");
 }
 
 export default function Home() {
@@ -139,7 +227,7 @@ export default function Home() {
   const [skippedAgents, setSkippedAgents] = useState<Record<string, boolean>>({});
 
   // Datos cargados desde Excel (opcional) para saltear el Scout y ahorrar tokens
-  const [equiposExcel, setEquiposExcel] = useState<EquipoExcel[] | null>(null);
+  const [datosExcel, setDatosExcel] = useState<DatosExcel | null>(null);
   const [nombreArchivo, setNombreArchivo] = useState("");
   const [errorExcel, setErrorExcel] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,23 +241,23 @@ export default function Home() {
       const wb = XLSX.read(buffer, { cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
-      const equipos = parsearExcel(rows);
+      const datos = parsearExcel(rows);
 
-      if (equipos.length === 0) {
+      if (datos.equipos.length === 0) {
         setErrorExcel("No pude reconocer equipos en el Excel. Revisá que siga la plantilla (nombre de equipo en una fila, encabezados en la siguiente, partidos abajo).");
-        setEquiposExcel(null);
+        setDatosExcel(null);
         return;
       }
-      setEquiposExcel(equipos);
+      setDatosExcel(datos);
       setNombreArchivo(file.name);
     } catch (err: any) {
       setErrorExcel("No pude leer el archivo: " + err.message);
-      setEquiposExcel(null);
+      setDatosExcel(null);
     }
   }
 
   function quitarExcel() {
-    setEquiposExcel(null);
+    setDatosExcel(null);
     setNombreArchivo("");
     setErrorExcel("");
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -177,9 +265,11 @@ export default function Home() {
 
   function construirDatosManuales(): string {
     const bloques: string[] = [];
-    if (equiposExcel && equiposExcel.length > 0) {
+    if (datosExcel && datosExcel.equipos.length > 0) {
       bloques.push("DATOS HISTÓRICOS CARGADOS POR EL USUARIO (desde Excel):");
-      equiposExcel.forEach(e => bloques.push(formatearBloqueEquipo(e)));
+      datosExcel.equipos.forEach(e => bloques.push(formatearBloqueEquipo(e)));
+      const global = formatearGlobal(datosExcel);
+      if (global) bloques.push(global);
     }
     return bloques.join("\n\n");
   }
@@ -274,9 +364,9 @@ export default function Home() {
             <label className="text-[10px] font-semibold text-gray-500 block mb-1">
               📊 Excel con datos históricos (opcional, ahorra tokens — se salta la búsqueda del Scout)
             </label>
-            {!equiposExcel ? (
+            {!datosExcel ? (
               <label className="flex items-center justify-center gap-2 border-2 border-dashed border-purple-200 rounded-lg py-3 text-xs text-purple-600 cursor-pointer hover:bg-purple-50">
-                📁 Subir Liga_Paraguaya.xlsx (misma plantilla de siempre)
+                📁 Subir Excel (misma plantilla de siempre)
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -291,12 +381,19 @@ export default function Home() {
                   <span className="text-xs font-semibold text-emerald-700">✓ {nombreArchivo}</span>
                   <button onClick={quitarExcel} className="text-xs text-gray-400 hover:text-red-500">✕ quitar</button>
                 </div>
-                {equiposExcel.map(e => (
+                {datosExcel.equipos.map(e => (
                   <div key={e.equipo} className="text-[10px] text-gray-600">
-                    <span className="font-semibold">{e.equipo}</span>: {e.partidos.length} partidos cargados
-                    {e.proximos.length > 0 && <> · {e.proximos.length} próximos partidos</>}
+                    <span className="font-semibold">{e.equipo}</span>: {e.partidos.length} partidos
+                    {e.proximos.length > 0 && <> · {e.proximos.length} próximos</>}
+                    {e.racha.length > 0 && <> · {e.racha.length} jugadores en racha</>}
                   </div>
                 ))}
+                {(datosExcel.arbitro || datosExcel.historial.length > 0) && (
+                  <div className="text-[10px] text-gray-600 mt-1 pt-1 border-t border-emerald-100">
+                    {datosExcel.arbitro && <>🧑‍⚖️ Árbitro: {datosExcel.arbitro} </>}
+                    {datosExcel.historial.length > 0 && <>· {datosExcel.historial.length} enfrentamientos H2H</>}
+                  </div>
+                )}
               </div>
             )}
             {errorExcel && (

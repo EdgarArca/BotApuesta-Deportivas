@@ -17,7 +17,7 @@ const AGENTS = [
     id: "scout",
     name: "🔭 Scout",
     search: true,
-    model: MODEL_CHICO,
+    model: MODEL_GRANDE,
     prompt: `Scout de datos para ${CASA_APUESTAS}. Busca TODO:
 - Odds 1X2, O/U 2.5, BTTS
 - Promedio goles a favor y en contra de cada equipo (local/visitante)
@@ -87,7 +87,7 @@ Formato:
     id: "esceptico",
     name: "🔍 Escéptico",
     search: false,
-    model: MODEL_CHICO,
+    model: MODEL_GRANDE,
     prompt: `Escéptico. Cuestiona todo:
 TRAMPA: [mercado inflado sin valor]
 VALOR OCULTO: [mercado que nadie ve]
@@ -97,7 +97,7 @@ VALOR OCULTO: [mercado que nadie ve]
     id: "matematico",
     name: "🧮 Matemático",
     search: false,
-    model: MODEL_CHICO,
+    model: MODEL_GRANDE,
     prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Disparos, Jugadores Clave, Escéptico), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
 
 TOP 5 VALOR:
