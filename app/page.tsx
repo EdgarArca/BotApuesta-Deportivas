@@ -101,24 +101,60 @@ function leerTablaLateral(rows: any[][], labelFila: number, labelCol: number, fi
   return datos;
 }
 
-// Parser principal: ubica cada bloque de equipo por su nombre, delimita su rango
-// de filas, y dentro de ese rango busca la tabla principal + Próximos Partidos +
-// Racha de Jugadores (dondequiera que estén). Al final busca la sección global
-// de Historial de Encuentros + Árbitro (si existe).
-function parsearExcel(rows: any[][]): DatosExcel {
-  const filasEquipo: number[] = [];
-  let filaHistorial: number | null = null;
+// ── POSICIONES FIJAS DE LA PLANTILLA ──────────────────────────────────────
+// Ajustá estos números si tu plantilla cambia.
+const FILA_EQUIPO_1 = 2;   // Excel fila 2 → nombre del primer equipo en col B
+const FILA_EQUIPO_2 = 10;  // Excel fila 10 → nombre del segundo equipo en col B
+const COL_PROXIMOS = 16;   // columna Q (índice 0-based) → sección "Próximos Partidos"
+const COL_RACHA = 21;      // columna V (índice 0-based) → sección "Racha de Jugadores"
+// ────────────────────────────────────────────────────────────────────────
 
+// Lee una sección lateral (Próximos Partidos / Racha de Jugadores) con la
+// estructura fija exacta: título en filaEquipo+1 (misma fila que "Fecha"),
+// sub-encabezados en filaEquipo+2, datos reales desde filaEquipo+3.
+function leerSeccionLateral(rows: any[][], filaEquipo: number, filaFin: number, colInicio: number, columnasDefault: string[]): any[] {
+  const filaSubHeader = rows[filaEquipo + 2] || [];
+  const textoSub = celdaVacia(filaSubHeader[colInicio]) ? "" : String(filaSubHeader[colInicio]).trim().toLowerCase();
+
+  let columnas: string[];
+  if (MAPA_ENCABEZADOS[textoSub]) {
+    columnas = [];
+    let c = colInicio;
+    while (!celdaVacia(filaSubHeader[c])) {
+      const texto = String(filaSubHeader[c]).trim().toLowerCase();
+      columnas.push(MAPA_ENCABEZADOS[texto] || texto);
+      c++;
+    }
+  } else {
+    columnas = columnasDefault;
+  }
+
+  const datos: any[] = [];
+  let i = filaEquipo + 3;
+  while (i <= filaFin && rows[i] && !celdaVacia(rows[i][colInicio])) {
+    const r = rows[i];
+    const obj: any = {};
+    columnas.forEach((col, idx) => { obj[col] = r[colInicio + idx]; });
+    datos.push(obj);
+    i++;
+  }
+  return datos;
+}
+
+// Parser principal: usa las dos filas fijas de arriba para ubicar a cada
+// equipo, y dentro del rango de cada uno lee Próximos Partidos + Racha de
+// Jugadores con la estructura fija (título / sub-encabezados / datos).
+// Al final busca la sección global de Historial de Encuentros + Árbitro.
+function parsearExcel(rows: any[][]): DatosExcel {
+  const filasEquipo = [FILA_EQUIPO_1 - 1, FILA_EQUIPO_2 - 1]; // a índice 0-based
+
+  let filaHistorial: number | null = null;
   for (let r = 0; r < rows.length; r++) {
     const fila = rows[r] || [];
     const c1 = fila[1];
-    const c2 = fila[2];
-    if (typeof c1 === "string" && c1.trim() !== "") {
-      const val = c1.trim().toLowerCase();
-      if (val === "historial de encuentros") { filaHistorial = r; continue; }
-      if (!ETIQUETAS_SECCION.includes(val) && celdaVacia(c2)) {
-        filasEquipo.push(r);
-      }
+    if (typeof c1 === "string" && c1.trim().toLowerCase() === "historial de encuentros") {
+      filaHistorial = r;
+      break;
     }
   }
 
@@ -130,7 +166,8 @@ function parsearExcel(rows: any[][]): DatosExcel {
   });
 
   const equipos: EquipoExcel[] = filasEquipo.map((filaEquipo, idx) => {
-    const nombreEquipo = String(rows[filaEquipo][1]).trim();
+    const filaCruda = rows[filaEquipo];
+    const nombreEquipo = filaCruda && !celdaVacia(filaCruda[1]) ? String(filaCruda[1]).trim() : "";
     const filaFin = limites[idx];
 
     const partidos: Partido[] = [];
@@ -144,16 +181,11 @@ function parsearExcel(rows: any[][]): DatosExcel {
       i++;
     }
 
-    let proximos: any[] = [];
-    const etProx = buscarEtiqueta(rows, filaEquipo, filaFin, "proximos partidos");
-    if (etProx) proximos = leerTablaLateral(rows, etProx.fila, etProx.col, filaFin, ["fecha", "rival", "condicion", "competencia"]);
-
-    let racha: any[] = [];
-    const etRacha = buscarEtiqueta(rows, filaEquipo, filaFin, "racha de jugadores");
-    if (etRacha) racha = leerTablaLateral(rows, etRacha.fila, etRacha.col, filaFin, ["jugador", "estadistica"]);
+    const proximos = leerSeccionLateral(rows, filaEquipo, filaFin, COL_PROXIMOS, ["fecha", "rival", "competencia", "condicion"]);
+    const racha = leerSeccionLateral(rows, filaEquipo, filaFin, COL_RACHA, ["jugador", "estadistica"]);
 
     return { equipo: nombreEquipo, partidos, proximos, racha };
-  });
+  }).filter(e => e.equipo !== ""); // si alguna de las 2 filas fijas está vacía, la descartamos
 
   let historial: any[] = [];
   let arbitro = "";
