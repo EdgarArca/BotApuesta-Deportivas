@@ -52,38 +52,6 @@ MEJOR APUESTA: [mercado]
 (máx 3 líneas)`
   },
   {
-    id: "disparos",
-    name: "🎯 Disparos",
-    search: false,
-    model: MODEL_GRANDE,
-    prompt: `Analista DISPAROS:
-ESPERADOS: XX tiros | ARQUERO EXIGIDO: [nombre]
-MEJOR APUESTA: [mercado]
-(máx 2 líneas)`
-  },
-  {
-    id: "jugadores_clave",
-    name: "⭐ Jugadores Clave",
-    search: false,
-    model: MODEL_GRANDE,
-    prompt: `Especialista en JUGADORES CLAVE. Con los datos del Scout, arma:
-
-TOP 3 JUGADORES CLAVE (uno o más por equipo) basándote en:
-- Estadísticas de la temporada (goles, asistencias, participación en gol)
-- Capitanía / liderazgo
-- Influencia en el juego del equipo
-- Cómo le fue al equipo cuando este jugador NO estuvo disponible (resultado, rendimiento)
-
-Formato:
-⭐ [Jugador] ([Equipo]) — [rol/posición]
-📊 Stats: [goles/asistencias/dato clave]
-🎖️ Capitán: [Sí/No]
-📉 Sin él: [qué pasó con el equipo en su ausencia, si hay datos]
-⚠️ RIESGO: [si está en duda por lesión/suspensión, indicarlo]
-
-(uno de estos bloques por cada jugador, máx 3 jugadores total)`
-  },
-  {
     id: "esceptico",
     name: "🔍 Escéptico",
     search: false,
@@ -98,7 +66,7 @@ VALOR OCULTO: [mercado que nadie ve]
     name: "🧮 Matemático",
     search: false,
     model: MODEL_GRANDE,
-    prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Disparos, Jugadores Clave, Escéptico), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
+    prompt: `Matemático. Con los datos de TODOS los demás agentes (Scout, Tarjetas, Córners, Escéptico), calcula EV = (Prob × Cuota) - 1 para los mercados relevantes, incluyendo una estimación de marcador probable basada en los promedios de goles del Scout.
 
 TOP 5 VALOR:
 1. [mercado/marcador] @ [cuota] → EV +XX%
@@ -127,7 +95,7 @@ TOP 5 VALOR:
 (Apostar solo X% del bankroll por ser alto riesgo)
 
 🟨 TARJETAS: [recomendación]
-🎯 DISPAROS: [recomendación]
+🚩 CÓRNERS: [recomendación]
 
 ⚠️ EVITAR: [mercado trampa]
 💡 MEJOR APUESTA: [en 1 línea]`

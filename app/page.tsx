@@ -6,14 +6,12 @@ const AGENTS_INFO: Record<string, { name: string; icon: string; color: string }>
   scout: { name: "Scout", icon: "🔭", color: "#8B5CF6" },
   tarjetas: { name: "Tarjetas", icon: "🟨", color: "#EF4444" },
   corners: { name: "Córners", icon: "🚩", color: "#F97316" },
-  disparos: { name: "Disparos", icon: "🎯", color: "#0EA5E9" },
-  jugadores_clave: { name: "Jugadores Clave", icon: "⭐", color: "#EAB308" },
   esceptico: { name: "Escéptico", icon: "🔍", color: "#DC2626" },
   matematico: { name: "Matemático", icon: "🧮", color: "#10B981" },
   sintetizador: { name: "Síntesis", icon: "🧠", color: "#7C3AED" },
 };
 
-const AGENT_ORDER = ["scout", "tarjetas", "corners", "disparos", "jugadores_clave", "esceptico", "matematico", "sintetizador"];
+const AGENT_ORDER = ["scout", "tarjetas", "corners", "esceptico", "matematico", "sintetizador"];
 const TOTAL_AGENTS = AGENT_ORDER.length;
 
 // Columnas esperadas en la tabla principal de cada equipo (empezando en col B)
@@ -550,10 +548,9 @@ export default function Home() {
             <div className="text-4xl mb-2">⚽</div>
             <p>Escribí un partido para analizar</p>
             <div className="flex justify-center gap-2 mt-3 text-xs flex-wrap">
-              <span className="bg-yellow-50 text-yellow-600 px-2 py-1 rounded">⭐ Jugadores Clave</span>
               <span className="bg-red-50 text-red-600 px-2 py-1 rounded">🟨 Tarjetas</span>
               <span className="bg-orange-50 text-orange-600 px-2 py-1 rounded">🚩 Córners</span>
-              <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded">🎯 Disparos</span>
+              <span className="bg-purple-50 text-purple-600 px-2 py-1 rounded">🔍 Escéptico</span>
               <span className="bg-green-50 text-green-600 px-2 py-1 rounded">🧠 Veredicto</span>
             </div>
           </div>
